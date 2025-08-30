@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>规则贪吃蛇 · Rule-based Snake</title>
+<style>
+  :root{
+    --bg:#0f1220;
+    --panel:#171b2e;
+    --text:#e8ecff;
+    --muted:#9aa3c8;
+    --green:#22c55e;
+    --red:#ef4444;
+    --yellow:#f59e0b;
+    --grid:#141829;
+    --snake:#60a5fa;
+    --snakeHead:#93c5fd;
+    --food:#f87171;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background: radial-gradient(1200px 600px at 70% -10%, #1a2040 0%, var(--bg) 50%) fixed;
+    color:var(--text); font:16px/1.5 system-ui, -apple-system, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue",
+      "Noto Sans", "Microsoft Yahei", Arial, sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:18px;
+  }
+  .app{width:min(920px, 98vw)}
+  h1{margin:0 0 .25rem; font-size:22px}
+  .sub{color:var(--muted); margin-bottom:10px}
+  .wrap{
+    display:grid; grid-template-columns: 1fr 280px; gap:16px;
+  }
+  canvas{
+    width:100%; height:auto; border-radius:16px; background:var(--panel);
+    box-shadow:0 6px 36px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .side{
+    background:var(--panel); border-radius:16px; padding:14px 14px;
+    box-shadow:0 6px 36px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .row{display:flex; gap:8px; align-items:center; margin:8px 0}
+  button, .btn{
+    appearance:none; border:0; padding:9px 12px; border-radius:10px;
+    background:#2a3155; color:var(--text); cursor:pointer; font-weight:600;
+  }
+  button:disabled{opacity:.55; cursor:not-allowed}
+  .btn-primary{background:#35407a}
+  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#273055; color:#b7c0ea}
+  .k{padding:.2em .5em; border-radius:6px; background:#222848; color:#cbd5ff; font-weight:600; margin:0 .15em}
+  .log{
+    margin-top:8px; padding:8px; border-radius:10px; min-height:58px; color:#c7d2fe;
+    background:#131935; font-size:13px; white-space:pre-line;
+  }
+  .hint{color:#aab3da; font-size:13px}
+  .gridRow{display:flex; align-items:center; justify-content:space-between; gap:10px}
+  input[type="range"]{width:100%}
+  .scoreBoard{display:flex; gap:10px; margin:6px 0 2px}
+  .score{font-size:18px; font-weight:800}
+  .hi{color:#9ecbff}
+  .controls{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0}
+  .ok{color:var(--green)} .warn{color:var(--yellow)} .err{color:var(--red)}
+  @media (max-width: 900px){
+    .wrap{grid-template-columns:1fr; gap:12px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>规则贪吃蛇 <span class="badge">Classic AI · IF-THEN 规则</span></h1>
+  <div class="sub">方向键/WASD 操作。按 <span class="k">A</span> 开关<strong>规则驱动</strong>（自动寻食不撞墙），
+    <span class="k">Space</span> 暂停/继续，<span class="k">R</span> 重新开始。</div>
+  <div class="wrap">
+    <canvas id="board" width="720" height="720" aria-label="game board"></canvas>
+
+    <aside class="side">
+      <div class="scoreBoard">
+        <div class="score">分数：<span id="score">0</span></div>
+        <div class="score hi">最高：<span id="hi">0</span></div>
+        <div class="badge" id="ai-badge">AI: 关闭</div>
+      </div>
+
+      <div class="controls">
+        <button id="start" class="btn-primary">开始 / 继续</button>
+        <button id="pause">暂停</button>
+        <button id="restart">重新开始</button>
+        <button id="toggle-ai">切换 AI</button>
+      </div>
+
+      <div class="gridRow">
+        <div>速度</div>
+        <input id="speed" type="range" min="4" max="20" step="1" value="10"/>
+        <div><span class="badge" id="speedVal">10</span> 格/秒</div>
+      </div>
+
+      <div class="gridRow" style="margin-top:8px">
+        <div>棋盘</div>
+        <select id="size">
+          <option value="18">18 × 18（紧凑）</option>
+          <option value="22" selected>22 × 22（默认）</option>
+          <option value="26">26 × 26（宽松）</option>
+        </select>
+      </div>
+
+      <h3 style="margin:12px 0 6px">规则（IF-THEN）</h3>
+      <div class="hint">
+        机器人每一帧按下面顺序执行规则，首先命中的规则就会生效（可在“AI: 开启”时观察）。
+      </div>
+      <ol class="hint" style="margin:.6em 0 .4em .9em">
+        <li>如果朝向食物的方向安全 → 朝食物移动</li>
+        <li>否则如果直行安全 → 直行</li>
+        <li>否则如果左转安全 → 左转</li>
+        <li>否则如果右转安全 → 右转</li>
+        <li>否则（万不得已）→ 尝试掉头或随机安全方向</li>
+      </ol>
+
+      <div class="log" id="log">【规则日志】这里会实时显示“哪条规则触发了”。</div>
+      <div class="hint">操作：↑↓←→ / WASD · A 开关 AI · Space 暂停/继续 · R 重开</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* =========================
+   规则贪吃蛇（单文件版）
+   - 经典 AI：基于 IF-THEN 规则的自动寻路
+   - 无任何外部依赖，直接在浏览器打开即可
+   ========================= */
+
+(() => {
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const hiEl = document.getElementById('hi');
+  const aiBadge = document.getElementById('ai-badge');
+  const speedSlider = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
+  const sizeSel = document.getElementById('size');
+  const logEl = document.getElementById('log');
+
+  // 控件
+  document.getElementById('start').onclick = () => resume();
+  document.getElementById('pause').onclick = () => pause();
+  document.getElementById('restart').onclick = () => restart();
+  document.getElementById('toggle-ai').onclick = () => toggleAI();
+
+  speedSlider.oninput = () => {
+    speedVal.textContent = speedSlider.value;
+    game.state.stepPerSec = +speedSlider.value;
+  };
+  sizeSel.onchange = () => restart(+sizeSel.value);
+
+  // --- 游戏参数与状态 ---
+  const game = {
+    grid: 22,           // 边长（格）
+    cell: 30,           // 每格像素（会自动适配 canvas）
+    state: {
+      snake: [],
+      dir: {x:1,y:0},      // 当前方向
+      nextDir: {x:1,y:0},  // 待应用方向（用于流畅转向）
+      food: {x:5,y:5},
+      score: 0,
+      hi: +(localStorage.getItem('rulesnake_hi')||0),
+      stepPerSec: +speedSlider.value,
+      running: false,
+      ai: false,
+      ruleFired: ''
+    },
+    time:{
+      acc:0, last:0
+    }
+  };
+
+  // 初始化画布尺寸（方形）
+  function fitCanvas(){
+    const side = Math.min(720, Math.floor(Math.min(window.innerWidth*0.98, 900-280-20)));
+    canvas.width = canvas.height = side>400? side : 560; // 给移动端稍大点
+    game.cell = Math.floor(canvas.width / game.grid);
+  }
+  window.addEventListener('resize', fitCanvas);
+
+  // --- 工具函数 ---
+  const DIRS = {
+    Up:{x:0,y:-1}, Down:{x:0,y:1}, Left:{x:-1,y:0}, Right:{x:1,y:0}
+  };
+  function same(a,b){ return a.x===b.x && a.y===b.y; }
+  function add(a,b){ return {x:a.x+b.x, y:a.y+b.y}; }
+  function negate(a){ return {x:-a.x, y:-a.y}; }
+  function turnLeft(d){
+    if(d.x===1) return DIRS.Up;
+    if(d.x===-1) return DIRS.Down;
+    if(d.y===1) return DIRS.Right;
+    return DIRS.Left;
+  }
+  function turnRight(d){
+    if(d.x===1) return DIRS.Down;
+    if(d.x===-1) return DIRS.Up;
+    if(d.y===1) return DIRS.Left;
+    return DIRS.Right;
+  }
+  function within(x,y){ return x>=0 && y>=0 && x<game.grid && y<game.grid; }
+
+  function cellOccupied(x,y, snakeArr){
+    // 判断是否与身体任一格重叠
+    for(let i=0;i<snakeArr.length;i++){
+      const s = snakeArr[i];
+      if(s.x===x && s.y===y) return true;
+    }
+    return false;
+  }
+
+  function rndInt(n){ return Math.floor(Math.random()*n); }
+  function placeFood(){
+    const s = game.state.snake;
+    while(true){
+      const f = {x:rndInt(game.grid), y:rndInt(game.grid)};
+      if(!cellOccupied(f.x,f.y,s)){ game.state.food = f; break; }
+    }
+  }
+
+  function updateBadge(){
+    aiBadge.textContent = 'AI: ' + (game.state.ai ? '开启' : '关闭');
+    aiBadge.style.background = game.state.ai ? '#1e2a5b' : '#273055';
+    aiBadge.style.color = game.state.ai ? '#a7f3d0' : '#b7c0ea';
+  }
+
+  // --- 绘制 ---
+  function roundRect(x,y,w,h,r){
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+  }
+
+  function drawGrid(){
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--panel');
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    const gcol = getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#141829';
+    ctx.strokeStyle = gcol;
+    ctx.lineWidth = 1;
+
+    for(let i=1;i<game.grid;i++){
+      const p = Math.floor(i*game.cell)+.5;
+      ctx.beginPath();
+      ctx.moveTo(p,0); ctx.lineTo(p,canvas.height); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0,p); ctx.lineTo(canvas.width,p); ctx.stroke();
+    }
+  }
+
+  function drawFood(){
+    const {x,y} = game.state.food;
+    const pad = Math.floor(game.cell*0.12);
+    const size = game.cell - pad*2;
+
+    const gx = x*game.cell + pad, gy = y*game.cell + pad;
+    const grad = ctx.createLinearGradient(gx,gy,gx+size,gy+size);
+    grad.addColorStop(0, '#fca5a5');
+    grad.addColorStop(1, '#ef4444');
+    ctx.fillStyle = grad;
+    roundRect(gx, gy, size, size, Math.floor(size*0.25));
+    ctx.fill();
+  }
+
+  function drawSnake(){
+    const s = game.state.snake;
+    for(let i=0;i<s.length;i++){
+      const seg = s[i];
+      const pad = i===0 ? Math.floor(game.cell*0.08) : Math.floor(game.cell*0.16);
+      const size = game.cell - pad*2;
+      const gx = seg.x*game.cell + pad, gy = seg.y*game.cell + pad;
+
+      if(i===0){
+        const grad = ctx.createLinearGradient(gx,gy,gx+size,gy+size);
+        grad.addColorStop(0, '#dbeafe'); // Head
+        grad.addColorStop(1, '#93c5fd');
+        ctx.fillStyle = grad;
+      }else{
+        const grad = ctx.createLinearGradient(gx,gy,gx+size,gy+size);
+        grad.addColorStop(0, '#93c5fd');
+        grad.addColorStop(1, '#60a5fa');
+        ctx.fillStyle = grad;
+      }
+      roundRect(gx, gy, size, size, Math.floor(size*0.25));
+      ctx.fill();
+    }
+  }
+
+  function drawHUD(){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillRect(0,0, 200, 44);
+
+    ctx.fillStyle = '#cbd5ff';
+    ctx.font = 'bold 16px ui-sans-serif,system-ui';
+    ctx.fillText(`分数: ${game.state.score}`, 10, 18);
+    ctx.fillText(`最高: ${game.state.hi}`, 10, 38);
+
+    ctx.textAlign = 'right';
+    ctx.fillText(`AI: ${game.state.ai ? 'ON' : 'OFF'}`, 195, 18);
+    ctx.fillText(`${game.state.stepPerSec} 格/秒`, 195, 38);
+    ctx.restore();
+  }
+
+  function render(){
+    drawGrid();
+    drawFood();
+    drawSnake();
+    drawHUD();
+  }
+
+  // --- 核心：规则驱动的 AI 选择方向 ---
+  function aiChooseDirection(){
+    const s = game.state.snake;
+    const head = s[0];
+    const cur = game.state.dir;
+    const food = game.state.food;
+
+    // 判断某方向是否“安全”（不会立即撞墙/身体）。
+    // 注意：如果下一步不会吃到食物，尾巴会移动，因此允许走到“当前尾巴”所在格。
+    const tail = s[s.length-1];
+    function safe(dir){
+      const nx = head.x + dir.x, ny = head.y + dir.y;
+      if(!within(nx,ny)) return false;
+      // 如果不是吃到食物，则尾巴会挪走
+      const willEat = (nx===food.x && ny===food.y);
+      for(let i=0;i<s.length;i++){
+        const seg = s[i];
+        // 允许踩到“旧尾巴”
+        if(!willEat && i===s.length-1 && seg.x===nx && seg.y===ny) continue;
+        if(seg.x===nx && seg.y===ny) return false;
+      }
+      return true;
+    }
+
+    const dx = Math.sign(food.x - head.x);
+    const dy = Math.sign(food.y - head.y);
+    const towardX = dx===1 ? DIRS.Right : (dx===-1 ? DIRS.Left : null);
+    const towardY = dy===1 ? DIRS.Down : (dy===-1 ? DIRS.Up : null);
+
+    // 1) 朝食物方向（按距离较大的轴优先）【规则1】
+    const distX = Math.abs(food.x - head.x);
+    const distY = Math.abs(food.y - head.y);
+    if(distX >= distY){
+      if(towardX && !same(towardX, negate(cur)) && safe(towardX)){
+        game.state.ruleFired = "规则1：朝食物（X 轴）安全 → 向食物前进";
+        return towardX;
+      }
+      if(towardY && !same(towardY, negate(cur)) && safe(towardY)){
+        game.state.ruleFired = "规则1：朝食物（Y 轴）安全 → 向食物前进";
+        return towardY;
+      }
+    }else{
+      if(towardY && !same(towardY, negate(cur)) && safe(towardY)){
+        game.state.ruleFired = "规则1：朝食物（Y 轴）安全 → 向食物前进";
+        return towardY;
+      }
+      if(towardX && !same(towardX, negate(cur)) && safe(towardX)){
+        game.state.ruleFired = "规则1：朝食物（X 轴）安全 → 向食物前进";
+        return towardX;
+      }
+    }
+
+    // 2) 直行安全【规则2】
+    if(safe(cur)){
+      game.state.ruleFired = "规则2：直行安全 → 直行";
+      return cur;
+    }
+
+    // 3) 左转安全【规则3】
+    const L = turnLeft(cur);
+    if(!same(L, negate(cur)) && safe(L)){
+      game.state.ruleFired = "规则3：左转安全 → 左转";
+      return L;
+    }
+
+    // 4) 右转安全【规则4】
+    const R = turnRight(cur);
+    if(!same(R, negate(cur)) && safe(R)){
+      game.state.ruleFired = "规则4：右转安全 → 右转";
+      return R;
+    }
+
+    // 5) 否则：尝试掉头或找任意安全方向【规则5】
+    const dirs = [DIRS.Up, DIRS.Down, DIRS.Left, DIRS.Right];
+    for(const d of dirs){
+      if(!same(d, negate(cur)) && safe(d)){
+        game.state.ruleFired = "规则5：前方皆险 → 选择任意安全方向";
+        return d;
+      }
+    }
+    // 最后不得已才掉头（大概率会撞到第二节身体，等价于宣告失败）
+    game.state.ruleFired = "规则5：无路可走 → 掉头（可能失败）";
+    return negate(cur);
+  }
+
+  // --- 更新（一格） ---
+  function step(){
+    const st = game.state;
+    // 应用输入方向（玩家）或 AI 方向
+    if(st.ai){
+      st.nextDir = aiChooseDirection();
+      logEl.textContent = "【规则日志】" + st.ruleFired;
+    }
+    // 禁止直接 180° 掉头
+    if(!(st.snake.length>1 && same(st.nextDir, negate(st.dir)))){
+      st.dir = st.nextDir;
+    }
+
+    // 计算新头
+    const head = st.snake[0];
+    const newHead = add(head, st.dir);
+
+    // 撞墙？
+    if(!within(newHead.x, newHead.y)){
+      gameOver(); return;
+    }
+    // 撞自己？
+    for(let i=0;i<st.snake.length;i++){
+      const seg = st.snake[i];
+      // 若不吃到食物，尾巴会移动，允许新头占据“旧尾”位置
+      const isTail = (i===st.snake.length-1);
+      if(seg.x===newHead.x && seg.y===newHead.y){
+        const willEat = same(newHead, st.food);
+        if(!(isTail && !willEat)){ gameOver(); return; }
+      }
+    }
+
+    // 头部前插
+    st.snake.unshift(newHead);
+
+    // 吃到食物？
+    if(same(newHead, st.food)){
+      st.score += 1;
+      if(st.score>st.hi){ st.hi = st.score; localStorage.setItem('rulesnake_hi', st.hi); }
+      scoreEl.textContent = st.score;
+      hiEl.textContent = st.hi;
+      placeFood();
+    }else{
+      // 移除尾巴
+      st.snake.pop();
+    }
+  }
+
+  // --- 游戏循环 ---
+  function tick(t){
+    if(!game.state.running){ game.time.last = t; render(); return requestAnimationFrame(tick); }
+    const dt = (t - game.time.last)/1000; game.time.last = t;
+    game.time.acc += dt;
+
+    const interval = 1 / game.state.stepPerSec;
+    while(game.time.acc >= interval){
+      step();
+      game.time.acc -= interval;
+    }
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  // --- 生命周期 ---
+  function startState(g=game.grid){
+    game.grid = g;
+    fitCanvas();
+
+    const mid = Math.floor(game.grid/2);
+    game.state.snake = [{x:mid-1,y:mid}, {x:mid-2,y:mid}];
+    game.state.dir = {x:1,y:0};
+    game.state.nextDir = {x:1,y:0};
+    game.state.food = {x:mid+3,y:mid};
+    game.state.score = 0;
+    scoreEl.textContent = '0';
+    hiEl.textContent = game.state.hi;
+    game.state.ruleFired = '';
+    logEl.textContent = "【规则日志】等待中…";
+    placeFood();
+    render();
+  }
+
+  function gameOver(){
+    game.state.running = false;
+    render();
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#fee2e2';
+    ctx.font = 'bold 32px ui-sans-serif,system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', canvas.width/2, canvas.height/2 - 10);
+    ctx.font = '16px ui-sans-serif,system-ui';
+    ctx.fillStyle = '#cbd5ff';
+    ctx.fillText('按 R 重新开始 · 按 Enter/空格 继续', canvas.width/2, canvas.height/2 + 22);
+    ctx.restore();
+  }
+
+  function pause(){ game.state.running = false; }
+  function resume(){ game.state.running = true; }
+  function restart(g){
+    startState(g ?? game.grid);
+    resume();
+  }
+  function toggleAI(){
+    game.state.ai = !game.state.ai;
+    updateBadge();
+  }
+
+  // --- 输入 ---
+  const keyDir = {
+    ArrowUp: DIRS.Up,    KeyW: DIRS.Up,
+    ArrowDown: DIRS.Down,KeyS: DIRS.Down,
+    ArrowLeft: DIRS.Left,KeyA: DIRS.Left,
+    ArrowRight: DIRS.Right,KeyD: DIRS.Right
+  };
+  window.addEventListener('keydown', e=>{
+    if(keyDir[e.code] || keyDir[e.key]){
+      const d = keyDir[e.code] || keyDir[e.key];
+      // 禁止立即掉头
+      if(!(game.state.snake.length>1 && same(d, negate(game.state.dir)))){
+        game.state.nextDir = d;
+      }
+      e.preventDefault();
+    }else if(e.code==='Space' || e.code==='Enter'){
+      game.state.running ? pause() : resume();
+      e.preventDefault();
+    }else if(e.key==='a' || e.key==='A'){
+      toggleAI();
+      e.preventDefault();
+    }else if(e.key==='r' || e.key==='R'){
+      restart();
+      e.preventDefault();
+    }
+  }, {passive:false});
+
+  // --- 启动 ---
+  startState(+sizeSel.value);
+  updateBadge();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
